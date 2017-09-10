@@ -1,11 +1,30 @@
 // ============================================================================
 // ============================================================================
-class processor_t {
-    private:    
-    
-    
-    public:
+struct btb_line {
+    uint64_t tag;
+    uint64_t addr;
+    uint64_t clock;
+    int valid;
+    branch_t branch_type;
+    int bht;
+};
 
+class processor_t {
+    private:
+
+    public:
+		btb_line *btb;
+		int penalty_count;
+		int guess;
+		unsigned int last_idx;
+		opcode_package_t last_instruction;
+
+		uint64_t miss_btb;
+		uint64_t wrong_guess;
+		uint64_t total_branches;
+
+		uint64_t begin_clock;
+		uint64_t end_clock;
 		// ====================================================================
 		/// Methods
 		// ====================================================================
