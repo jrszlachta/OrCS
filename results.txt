@@ -1,0 +1,13 @@
+CALCULIX
+BTB 512 Entradas 4-Way - BHT 1 Bit
+
+######################################################
+trace_reader_t
+fetch_instructions:200001551
+######################################################
+processor_t
+209906504 Cycles
+Misses: 394 - Total: 3926849
+Hits BTB: 99.989967%
+Wrong Guesses: 1237725
+Hits BHT: 68.480453%
