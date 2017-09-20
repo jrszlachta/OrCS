@@ -9,11 +9,19 @@ struct btb_line {
     int bht;
 };
 
+struct cache_line {
+	uint64_t tag;
+	uint64_t clock;
+	int valid;
+	int dirty;
+};
+
 class processor_t {
     private:
 
     public:
 		btb_line *btb;
+		cache_line *l1;
 		int penalty_count;
 		int guess;
 		unsigned int last_idx;

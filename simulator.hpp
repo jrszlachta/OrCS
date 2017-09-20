@@ -32,9 +32,20 @@ extern orcs_engine_t orcs_engine;
 // ===========================================================================
 /// Definition for BTB Simulator
 // ===========================================================================
-#define PENALTY		8
-#define ENTRIES 	512
-#define N_WAY		4
+#define BTB_PENALTY	8
+#define BTB_LINES 	512
+#define BTB_WAYS	4
+
+// ===========================================================================
+/// Definition for Cache Simulator
+/// L1: 64KB; L2: 1MB; Block: 64B
+// ===========================================================================
+#define L1_PENALTY	1
+#define L1_WAYS		4
+#define L1_LINES	1024
+#define L2_PENALTY	4
+#define L2_WAYS		8
+#define L2_LINES	16384
 
 // ============================================================================
 /// Definitions for Log, Debug, Warning, Error and Statistics

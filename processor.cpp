@@ -4,7 +4,7 @@ static unsigned int get_btb_idx(btb_line *btb, uint64_t addr) {
 	/// Set Number taken from bits 2-8 on the address
 	unsigned int set_number = (int) ((addr >> 2) & 0x7F);
 	/// Line that the set starts
-	unsigned int btb_base_line = set_number * N_WAY;
+	unsigned int btb_base_line = set_number * BTB_WAYS;
 	unsigned int line = 0;
 	/// Maximum uint64_t value
 	uint64_t min_clock = 0xFFFFFFFFFFFFFFFF;
@@ -23,6 +23,26 @@ static unsigned int get_btb_idx(btb_line *btb, uint64_t addr) {
 	return line;
 }
 
+static unsigned int get_cache_idx(cache_line *L, uint64_t addr, int level) {
+	unsigned int set_number = (int) ((addr >> 2) & 0x7F);
+	unsigned int cache_base_line = set_number * (level == 1 ? L1_WAYS : L2_WAYS);
+	unsigned int line;
+	uint64_t min_clock = 0xFFFFFFFFFFFFFFFF;
+	unsigned int begin = cache_base_line;
+	unsigned int end = cache_base_line + (level == 1 ? L1_WAYS : L2_WAYS);
+	for(unsigned int i = begin; i < end; i++) {
+		if (!L[i].valid) return i;
+		else {
+		   	if (L[i].clock < min_clock) {
+				line = i;
+				min_clock = L[i].clock;
+			}
+			if (L[i].tag == addr) return i;
+		}
+	}
+	return line;
+}
+
 // =====================================================================
 processor_t::processor_t() {
 
@@ -30,14 +50,21 @@ processor_t::processor_t() {
 
 // =====================================================================
 void processor_t::allocate() {
-	btb = (btb_line *) malloc(sizeof(btb_line)*ENTRIES);
-	for (int i = 0; i < ENTRIES; i++) {
+	btb = (btb_line *) malloc(sizeof(btb_line)*BTB_LINES);
+	l1 = (cache_line *) malloc(sizeof(cache_line)*L1_LINES);
+	for (int i = 0; i < BTB_LINES; i++) {
 		btb[i].tag = 0;
 		btb[i].addr = 0;
 		btb[i].clock = 0;
 		btb[i].valid = 0;
 		btb[i].branch_type = BRANCH_COND;
 		btb[i].bht = 0;
+	}
+	for (int i = 0; i < L1_LINES; i++) {
+		l1[i].tag = 0;
+		l1[i].clock = 0;
+		l1[i].valid = 0;
+		l1[i].dirty = 0;
 	}
 	miss_btb = 0;
 	wrong_guess = 0;
@@ -59,6 +86,7 @@ void processor_t::clock() {
 		}
 
 		int btb_idx = get_btb_idx(btb, new_instruction.opcode_address);
+		int cache_idx = get_cache_idx(l1, new_instruction.opcode_address, 1);;
 
 		if(new_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH) {
 			total_branches++;
@@ -108,7 +136,7 @@ void processor_t::clock() {
 			last_idx = btb_idx;
 			last_instruction = new_instruction;
 		}
-	} else if (penalty_count == PENALTY) {
+	} else if (penalty_count == BTB_PENALTY) {
 		/// After 8 cycles the processor is able to get a new instruction
 		penalty_count = 0;
    	} else {
