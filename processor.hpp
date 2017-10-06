@@ -31,6 +31,9 @@ class processor_t {
 		uint64_t wrong_guess;
 		uint64_t total_branches;
 
+		uint64_t miss_l1;
+		uint64_t miss_l2;
+
 		uint64_t begin_clock;
 		uint64_t end_clock;
 		// ====================================================================

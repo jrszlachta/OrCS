@@ -24,7 +24,7 @@ static unsigned int get_btb_idx(btb_line *btb, uint64_t addr) {
 }
 
 static unsigned int get_cache_idx(cache_line *L, uint64_t addr, int level) {
-	unsigned int set_number = (int) ((addr >> 2) & 0x7F);
+	unsigned int set_number = (int) ((addr >> 8) & 0x7F);
 	unsigned int cache_base_line = set_number * (level == 1 ? L1_WAYS : L2_WAYS);
 	unsigned int line;
 	uint64_t min_clock = 0xFFFFFFFFFFFFFFFF;
@@ -41,6 +41,14 @@ static unsigned int get_cache_idx(cache_line *L, uint64_t addr, int level) {
 		}
 	}
 	return line;
+}
+
+static void get_l1() {
+
+}
+
+static void get_l2() {
+
 }
 
 // =====================================================================
@@ -67,6 +75,8 @@ void processor_t::allocate() {
 		l1[i].dirty = 0;
 	}
 	miss_btb = 0;
+	miss_l1 = 0;
+	miss_l2 = 0;
 	wrong_guess = 0;
 	total_branches = 0;
 	penalty_count = 0;
@@ -86,7 +96,8 @@ void processor_t::clock() {
 		}
 
 		int btb_idx = get_btb_idx(btb, new_instruction.opcode_address);
-		int cache_idx = get_cache_idx(l1, new_instruction.opcode_address, 1);;
+		int l1_idx = get_cache_idx(l1, new_instruction.opcode_address, 1);
+		//int l2_idx = get_cache_idx(l2, new_instruction.opcode_address, 2);
 
 		if(new_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH) {
 			total_branches++;
@@ -136,6 +147,45 @@ void processor_t::clock() {
 			last_idx = btb_idx;
 			last_instruction = new_instruction;
 		}
+
+		/// Cache
+		// Instructions
+		if (new_instruction.opcode_operation == INSTRUCTION_OPERATION_MEM_LOAD || INSTRUCTION_OPERATION_MEM_STORE) {
+			if (new_instruction.is_read) {
+				//get L1
+			} else if (new_instruction.is_write) {
+				//put L1
+			}
+		} else if (new_instruction.opcode_operation == INSTRUCTION_OPERATION_HMC_ROA) {
+			if (new_instruction.is_read) {
+				//get L1
+			}
+			if (new_instruction.is_read2) {
+				//get L1
+			}
+
+		} else if (new_instruction.opcode_operation == INSTRUCTION_OPERATION_HMC_ROWA) {
+			if (new_instruction.is_read) {
+				//get L1
+			}
+			if (new_instruction.is_read2) {
+				//get L1
+			}
+			if (new_instruction.is_write) {
+				//put L1
+			}
+
+		}
+		/*if (address == l1[l1_idx].tag) {
+			if (l1[l1_idx].valid) {
+				orcs_engine.global_cycle++;
+			} else { //L2->L1 Write Back
+			}
+		} else {// L2->L1
+			if (l1[l1_idx].valid) {// Write Back
+			}
+		}*/
+
 	} else if (penalty_count == BTB_PENALTY) {
 		/// After 8 cycles the processor is able to get a new instruction
 		penalty_count = 0;
