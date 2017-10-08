@@ -72,12 +72,12 @@ void processor_t::clock() {
 				btb[btb_idx].clock = orcs_engine.get_global_cycle();
 				btb[btb_idx].valid = 1;
 				btb[btb_idx].branch_type = new_instruction.branch_type;
-				btb[btb_idx].bht = 1;
-				guess = btb[btb_idx].bht;
+				btb[btb_idx].bht = 0;
+				guess = 0;
 			} else {
 				/// Branch is on BTB
-				/// Guess = BHT 1 Bit
-				guess = btb[btb_idx].bht;
+				/// Guess = BHT 2 Bit
+				btb[btb_idx].bht <= 1 ? guess = 0 : guess = 1;
 			}
 
 			last_idx = btb_idx;
@@ -89,7 +89,7 @@ void processor_t::clock() {
 						+ last_instruction.opcode_size
 						== new_instruction.opcode_address) {
 					/// Branch not taken
-					btb[last_idx].bht = 0;
+					if (btb[last_idx].bht > 0) btb[last_idx].bht--;
 					if (guess == 1) {
 						/// Wrong guess generates penalty
 						penalty_count++;
@@ -97,7 +97,7 @@ void processor_t::clock() {
 					}
 				} else {
 					/// Branch taken
-					btb[last_idx].bht = 1;
+					if (btb[last_idx].bht < 3) btb[last_idx].bht++;
 					if (guess == 0) {
 						/// Wrong guess generates penalty
 						penalty_count++;
