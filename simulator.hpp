@@ -36,6 +36,12 @@ extern orcs_engine_t orcs_engine;
 #define ENTRIES 	512
 #define N_WAY		4
 
+// ===========================================================================
+/// Definition for Branch Predictor
+// ===========================================================================
+#define TABLES 		4
+#define WEIGHTS		128
+
 // ============================================================================
 /// Definitions for Log, Debug, Warning, Error and Statistics
 // ============================================================================
@@ -124,9 +130,6 @@ enum branch_t {
     BRANCH_UNCOND,
     BRANCH_COND
 };
-
-
-
 
 /// Our Includes
 #include "./simulator.hpp"
