@@ -34,7 +34,8 @@ int processor_t::prediction(uint64_t addr) {
 	for (int i = 0; i < TABLES; i++) {
 		(n) ? addrn = n->addr : addrn = 0;
 		(m) ? addrm = m->addr : addrm = 0;
-		ind->gshare[i] = (((history_segment << 0) & 0xF) ^ addr) % WEIGHTS;
+		/// Xor do history_segment com log(WEIGHTS) bits
+		ind->gshare[i] = (((history_segment >> i) & 0x3FF) ^ addr) % WEIGHTS;
 		ind->path[i]   = (addrn ^ (addrm << 1)) % WEIGHTS;
 		sum += weights[i][ind->gshare[i]] + weights[i][ind->path[i]];
 		(n && n->next) ? n = n->next : n = NULL;
@@ -46,14 +47,14 @@ int processor_t::prediction(uint64_t addr) {
 }
 
 void processor_t::update(int outcome) {
-	if (predicted != outcome || abs(sum) < threshold) {
+	if (predicted != outcome || abs(last_sum) < threshold) {
 		for (int i = 0; i < TABLES; i++) {
 			if (outcome == 1) {
-				weights[i][ind->gshare[i]] += 1;
-				weights[i][ind->path[i]] += 1;
+				weights[i][last_ind->gshare[i]] += 1;
+				weights[i][last_ind->path[i]] += 1;
 			} else {
-				weights[i][ind->gshare[i]] -= 1;
-				weights[i][ind->path[i]] -= 1;
+				weights[i][last_ind->gshare[i]] -= 1;
+				weights[i][last_ind->path[i]] -= 1;
 			}
 		}
 	}
@@ -92,8 +93,11 @@ void processor_t::allocate() {
 		}
 	}
 	ind = (struct index *) malloc(sizeof(struct index));
+	last_ind = (struct index *) malloc(sizeof(struct index));
 	ind->gshare = (int *) malloc(sizeof(int)*TABLES);
 	ind->path = (int *) malloc(sizeof(int)*TABLES);
+	last_ind->gshare = (int *) malloc(sizeof(int)*TABLES);
+	last_ind->path = (int *) malloc(sizeof(int)*TABLES);
 	past_branch = new_queue();
 
 	begin_clock = orcs_engine.get_global_cycle();
@@ -123,8 +127,8 @@ void processor_t::clock() {
 			btb[btb_idx].clock = orcs_engine.get_global_cycle();
 			btb[btb_idx].valid = 1;
 			btb[btb_idx].branch_type = new_instruction.branch_type;
-			//btb[btb_idx].bht = 0;
-			guess = 0; //???
+			//If not on BTB, needs to load pc+opcode_size
+			guess = 0;
 		} else {
 			/// Branch is on BTB
 			/// Guess = BHT 2 Bit
@@ -156,6 +160,10 @@ void processor_t::clock() {
 		}
 	}
 	predicted = guess;
+	for (int i = 0; i < TABLES; i++) {
+		last_ind->gshare[i] = ind->gshare[i];
+		last_ind->path[i] = ind->path[i];
+	}
 	last_sum = sum;
 	last_idx = btb_idx;
 	last_instruction = new_instruction;

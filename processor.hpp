@@ -27,9 +27,9 @@ class processor_t {
 		uint64_t total_branches;
 
 		struct queue *past_branch;
-		uint16_t history_segment;
+		uint32_t history_segment;
 		uint8_t threshold;
-		struct index *ind;
+		struct index *ind, *last_ind;
 		int **weights;
 		int predicted;
 		int sum, last_sum;

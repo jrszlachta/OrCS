@@ -39,8 +39,8 @@ extern orcs_engine_t orcs_engine;
 // ===========================================================================
 /// Definition for Branch Predictor
 // ===========================================================================
-#define TABLES 		4
-#define WEIGHTS		128
+#define TABLES 		16
+#define WEIGHTS		1024
 
 // ============================================================================
 /// Definitions for Log, Debug, Warning, Error and Statistics
