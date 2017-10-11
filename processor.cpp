@@ -79,35 +79,31 @@ void processor_t::clock() {
 				/// Guess = BHT 2 Bit
 				btb[btb_idx].bht <= 1 ? guess = 0 : guess = 1;
 			}
-
-			last_idx = btb_idx;
-			last_instruction = new_instruction;
-		} else {
-			if (last_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH && last_instruction.branch_type == BRANCH_COND) {
-				/// If last instruction was an conditional branch, check if it was taken or not
-				if (last_instruction.opcode_address
-						+ last_instruction.opcode_size
-						== new_instruction.opcode_address) {
-					/// Branch not taken
-					if (btb[last_idx].bht > 0) btb[last_idx].bht--;
-					if (guess == 1) {
-						/// Wrong guess generates penalty
-						penalty_count++;
-						wrong_guess++;
-					}
-				} else {
-					/// Branch taken
-					if (btb[last_idx].bht < 3) btb[last_idx].bht++;
-					if (guess == 0) {
-						/// Wrong guess generates penalty
-						penalty_count++;
-						wrong_guess++;
-					}
+		}
+		if (last_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH && last_instruction.branch_type == BRANCH_COND) {
+			/// If last instruction was an conditional branch, check if it was taken or not
+			if (last_instruction.opcode_address
+					+ last_instruction.opcode_size
+					== new_instruction.opcode_address) {
+				/// Branch not taken
+				if (btb[last_idx].bht > 0) btb[last_idx].bht--;
+				if (guess == 1) {
+					/// Wrong guess generates penalty
+					penalty_count++;
+					wrong_guess++;
+				}
+			} else {
+				/// Branch taken
+				if (btb[last_idx].bht < 3) btb[last_idx].bht++;
+				if (guess == 0) {
+					/// Wrong guess generates penalty
+					penalty_count++;
+					wrong_guess++;
 				}
 			}
-			last_idx = btb_idx;
-			last_instruction = new_instruction;
 		}
+		last_idx = btb_idx;
+		last_instruction = new_instruction;
 	} else if (penalty_count == PENALTY) {
 		/// After 8 cycles the processor is able to get a new instruction
 		penalty_count = 0;
