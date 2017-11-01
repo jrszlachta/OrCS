@@ -48,10 +48,14 @@ void processor_t:: get_l1(uint64_t addr) {
 	int idx = get_cache_idx(l1, addr, 1);
 	if (addr == l1[idx].tag) {
 		if (l1[idx].valid) {
+			//OK - hit
 		} else { //L2->L1 Write Back
+			get_l2(addr);
 		}
 	} else {// L2->L1
 		if (l1[idx].valid) {// Write Back
+			miss_l1++;
+			get_l2(addr);
 		}
 	}
 }
@@ -61,12 +65,18 @@ void processor_t:: get_l2(uint64_t addr) {
 	int idx = get_cache_idx(l2, addr, 2);
 	if (addr == l2[idx].tag) {
 		if (l2[idx].valid) {
-		} else {
+			//OK - hit
 		}
 	} else {
 		if (l2[idx].valid) {
+			miss_l2++;
+			orcs_engine.global_cycle += 200;
 		}
 	}
+
+}
+
+void processor_t::put_l1(uint64_t addr) {
 
 }
 
@@ -170,13 +180,13 @@ void processor_t::clock() {
 
 		/// Cache
 		if (new_instruction.is_read) {
-			// get L1
+			get_l1(new_instruction.read_address);
 		}
 		if (new_instruction.is_read2) {
-			// get L1
+			get_l1(new_instruction.read2_address);
 		}
 		if (new_instruction.is_write) {
-			// put L1
+			//put_l1(new_instruction.write_address);
 		}
 
 

@@ -45,5 +45,6 @@ class processor_t {
 	    void clock();
 		void get_l1(uint64_t addr);
 		void get_l2(uint64_t addr);
+		void put_l1(uint64_t addr);
 	    void statistics();
 };
