@@ -22,6 +22,7 @@ class processor_t {
     public:
 		btb_line *btb;
 		cache_line *l1;
+		cache_line *l2;
 		int penalty_count;
 		int guess;
 		unsigned int last_idx;
@@ -42,5 +43,7 @@ class processor_t {
 		processor_t();
 	    void allocate();
 	    void clock();
+		void get_l1(uint64_t addr);
+		void get_l2(uint64_t addr);
 	    void statistics();
 };
