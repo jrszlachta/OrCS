@@ -24,9 +24,10 @@ static unsigned int get_btb_idx(btb_line *btb, uint64_t addr) {
 }
 
 static unsigned int get_cache_idx(cache_line *L, uint64_t addr, int level) {
-	unsigned int set_number = (int) ((addr >> 8) & 0x7F);
+	uint64_t tag = addr >> 6;
+	unsigned int set_number = (int) ((tag) & (level == 1 ? L1_SET_MASK : L2_SET_MASK));
 	unsigned int cache_base_line = set_number * (level == 1 ? L1_WAYS : L2_WAYS);
-	unsigned int line;
+	unsigned int line = 0;
 	uint64_t min_clock = 0xFFFFFFFFFFFFFFFF;
 	unsigned int begin = cache_base_line;
 	unsigned int end = cache_base_line + (level == 1 ? L1_WAYS : L2_WAYS);
@@ -37,47 +38,94 @@ static unsigned int get_cache_idx(cache_line *L, uint64_t addr, int level) {
 				line = i;
 				min_clock = L[i].clock;
 			}
-			if (L[i].tag == addr) return i;
 		}
 	}
 	return line;
 }
 
+static int find_on_cache(cache_line *L, uint64_t addr, int level) {
+	uint64_t tag = addr >> 6;
+	unsigned int set_number = (int) ((tag) & (level == 1 ? L1_SET_MASK : L2_SET_MASK));
+	unsigned int cache_base_line = set_number * (level == 1 ? L1_WAYS : L2_WAYS);
+	unsigned int begin = cache_base_line;
+	unsigned int end = cache_base_line + (level == 1 ? L1_WAYS : L2_WAYS);
+	for(unsigned int i = begin; i < end; i++) {
+		if (L[i].tag == tag && L[i].valid) return i;
+	}
+	return -1;
+}
+
 void processor_t:: get_l1(uint64_t addr) {
 	orcs_engine.global_cycle++;
-	int idx = get_cache_idx(l1, addr, 1);
-	if (addr == l1[idx].tag) {
+	uint64_t tag = addr >> 6;
+	int idx = find_on_cache(l1, addr, 1);
+	if (idx != -1 && tag == l1[idx].tag) {
 		if (l1[idx].valid) {
-			//OK - hit
-		} else { //L2->L1 Write Back
-			get_l2(addr);
-		}
-	} else {// L2->L1
-		if (l1[idx].valid) {// Write Back
+			hit_l1++;
+			l1[idx].clock = orcs_engine.get_global_cycle();
+		} else {
 			miss_l1++;
 			get_l2(addr);
+			idx = get_cache_idx(l1, addr, 1);
+			l1[idx].tag = tag;
+			l1[idx].clock = orcs_engine.get_global_cycle();
+			l1[idx].valid = 1;
+			l1[idx].dirty = 0;
 		}
+	} else {
+		idx = get_cache_idx(l1, addr, 1);
+		miss_l1++;
+		if (l1[idx].dirty && l1[idx].valid) {
+			write_backs++;
+			orcs_engine.global_cycle += 200;
+		}
+		get_l2(addr);
+		l1[idx].tag = tag;
+		l1[idx].clock = orcs_engine.get_global_cycle();
+		l1[idx].valid = 1;
+		l1[idx].dirty = 0;
 	}
 }
 
 void processor_t:: get_l2(uint64_t addr) {
 	orcs_engine.global_cycle += 4;
-	int idx = get_cache_idx(l2, addr, 2);
-	if (addr == l2[idx].tag) {
+	uint64_t tag = addr >> 6;
+	int idx = find_on_cache(l2, addr, 2);
+	if (idx != -1 && tag == l2[idx].tag) {
 		if (l2[idx].valid) {
-			//OK - hit
-		}
-	} else {
-		if (l2[idx].valid) {
+			hit_l2++;
+			l2[idx].clock = orcs_engine.get_global_cycle();
+		} else {
+			idx = get_cache_idx(l2, addr, 2);
 			miss_l2++;
 			orcs_engine.global_cycle += 200;
+			l2[idx].tag = tag;
+			l2[idx].clock = orcs_engine.get_global_cycle();
+			l2[idx].valid = 1;
+			l2[idx].dirty = 0;
 		}
+	} else {
+		idx = get_cache_idx(l2, addr, 2);
+		miss_l2++;
+		orcs_engine.global_cycle += 200;
+		if (l2[idx].dirty && l2[idx].valid) {
+			write_backs++;
+			orcs_engine.global_cycle += 200;
+		}
+		l2[idx].tag = tag;
+		l2[idx].clock = orcs_engine.get_global_cycle();
+		l2[idx].valid = 1;
+		l2[idx].dirty = 0;
 	}
 
 }
 
 void processor_t::put_l1(uint64_t addr) {
-
+	get_l1(addr);
+	int l1_idx = find_on_cache(l1, addr, 1);
+	int l2_idx = find_on_cache(l2, addr, 2);
+	l1[l1_idx].dirty = 1;
+	if (l2_idx != -1) l2[l2_idx].valid = 0;
 }
 
 // =====================================================================
@@ -104,9 +152,17 @@ void processor_t::allocate() {
 		l1[i].valid = 0;
 		l1[i].dirty = 0;
 	}
+	for(int i = 0; i < L2_LINES; i++) {
+		l2[i].tag = 0;
+		l2[i].clock = 0;
+		l2[i].valid = 0;
+		l2[i].dirty = 0;
+	}
 	miss_btb = 0;
 	miss_l1 = 0;
+	hit_l1 = 0;
 	miss_l2 = 0;
+	hit_l2 = 0;
 	wrong_guess = 0;
 	total_branches = 0;
 	penalty_count = 0;
@@ -126,8 +182,6 @@ void processor_t::clock() {
 		}
 
 		int btb_idx = get_btb_idx(btb, new_instruction.opcode_address);
-		int l1_idx = get_cache_idx(l1, new_instruction.opcode_address, 1);
-		//int l2_idx = get_cache_idx(l2, new_instruction.opcode_address, 2);
 
 		if(new_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH) {
 			total_branches++;
@@ -186,7 +240,7 @@ void processor_t::clock() {
 			get_l1(new_instruction.read2_address);
 		}
 		if (new_instruction.is_write) {
-			//put_l1(new_instruction.write_address);
+			put_l1(new_instruction.write_address);
 		}
 
 
@@ -205,10 +259,8 @@ void processor_t::statistics() {
 	ORCS_PRINTF("######################################################\n");
 	ORCS_PRINTF("processor_t\n");
 	ORCS_PRINTF("%lu Cycles\n", end_clock - begin_clock);
-	ORCS_PRINTF("Misses: %lu - Total: %lu\n", miss_btb, total_branches);
-	ORCS_PRINTF("Hits BTB: %f%%\n", (float) (total_branches-miss_btb)/total_branches*100);
-	ORCS_PRINTF("Wrong Guesses: %lu\n", wrong_guess);
-	ORCS_PRINTF("Hits BHT: %f%%\n", (float) (total_branches-wrong_guess)/total_branches*100);
-
+	ORCS_PRINTF("L1: Hits: %lu - Total: %lu - Ratio: %f\n", hit_l1, (hit_l1 + miss_l1), (float) (hit_l1)/(hit_l1 + miss_l1));
+	ORCS_PRINTF("L2: Hits: %lu - Total: %lu - Ratio: %f\n", hit_l2, (hit_l2 + miss_l2), (float) (hit_l2)/(hit_l2 + miss_l2));
+	ORCS_PRINTF("Write Backs: %lu\n", write_backs);
 };
 

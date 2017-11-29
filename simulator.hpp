@@ -43,9 +43,11 @@ extern orcs_engine_t orcs_engine;
 #define L1_PENALTY	1
 #define L1_WAYS		4
 #define L1_LINES	1024
+#define L1_SET_MASK	(L1_LINES/L1_WAYS - 1)
 #define L2_PENALTY	4
 #define L2_WAYS		8
 #define L2_LINES	16384
+#define L2_SET_MASK	(L2_LINES/L2_WAYS - 1)
 
 // ============================================================================
 /// Definitions for Log, Debug, Warning, Error and Statistics

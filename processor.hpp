@@ -33,7 +33,10 @@ class processor_t {
 		uint64_t total_branches;
 
 		uint64_t miss_l1;
+		uint64_t hit_l1;
 		uint64_t miss_l2;
+		uint64_t hit_l2;
+		uint64_t write_backs;
 
 		uint64_t begin_clock;
 		uint64_t end_clock;
