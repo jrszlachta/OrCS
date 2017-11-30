@@ -1,4 +1,6 @@
 #include "simulator.hpp"
+#include "queue.hpp"
+#include <cmath>
 
 static unsigned int get_btb_idx(btb_line *btb, uint64_t addr) {
 	/// Set Number taken from bits 2-8 on the address
@@ -21,6 +23,41 @@ static unsigned int get_btb_idx(btb_line *btb, uint64_t addr) {
 	}
 
 	return line;
+}
+
+int processor_t::prediction(uint64_t addr) {
+	struct node *n = past_branch->first, *m;
+	uint64_t addrn, addrm;
+	sum = 0;
+	(n && n->next) ? n = n->next : n = NULL;
+	(n && n->next) ? m = n->next : m = NULL;
+	for (int i = 0; i < PRED_TABLES; i++) {
+		(n) ? addrn = n->addr : addrn = 0;
+		(m) ? addrm = m->addr : addrm = 0;
+		/// Xor do history_segment com log(WEIGHTS) bits
+		ind->gshare[i] = (((history_segment >> i) & 0x3FF) ^ addr) % PRED_WEIGHTS;
+		ind->path[i]   = (addrn ^ (addrm << 1)) % PRED_WEIGHTS;
+		sum += weights[i][ind->gshare[i]] + weights[i][ind->path[i]];
+		(n && n->next) ? n = n->next : n = NULL;
+		(n && n->next) ? m = n->next : m = NULL;
+	}
+	dequeue(past_branch);
+	if (sum >= 0) return 1;
+	return 0;
+}
+
+void processor_t::update(int outcome) {
+	if (predicted != outcome || abs(last_sum) < threshold) {
+		for (int i = 0; i < PRED_TABLES; i++) {
+			if (outcome == 1) {
+				weights[i][last_ind->gshare[i]] += 1;
+				weights[i][last_ind->path[i]] += 1;
+			} else {
+				weights[i][last_ind->gshare[i]] -= 1;
+				weights[i][last_ind->path[i]] -= 1;
+			}
+		}
+	}
 }
 
 static unsigned int get_cache_idx(cache_line *L, uint64_t addr, int level) {
@@ -144,7 +181,6 @@ void processor_t::allocate() {
 		btb[i].clock = 0;
 		btb[i].valid = 0;
 		btb[i].branch_type = BRANCH_COND;
-		btb[i].bht = 0;
 	}
 	for (int i = 0; i < L1_LINES; i++) {
 		l1[i].tag = 0;
@@ -167,7 +203,24 @@ void processor_t::allocate() {
 	total_branches = 0;
 	penalty_count = 0;
 	last_idx = 0;
-	guess = 0;
+
+	threshold = (uint8_t) floor(1.93*PRED_TABLES + PRED_TABLES/2);
+	history_segment = 0;
+	weights = (int **) malloc(sizeof(int *)*PRED_TABLES);
+	for (int i = 0; i < PRED_TABLES; i++) {
+		weights[i] = (int *) malloc(sizeof(int)*PRED_WEIGHTS);
+		for (int j = 0; j < PRED_WEIGHTS; j++) {
+			weights[i][j] = 0;
+		}
+	}
+	ind = (struct index *) malloc(sizeof(struct index));
+	last_ind = (struct index *) malloc(sizeof(struct index));
+	ind->gshare = (int *) malloc(sizeof(int)*PRED_TABLES);
+	ind->path = (int *) malloc(sizeof(int)*PRED_TABLES);
+	last_ind->gshare = (int *) malloc(sizeof(int)*PRED_TABLES);
+	last_ind->path = (int *) malloc(sizeof(int)*PRED_TABLES);
+	past_branch = new_queue();
+
 	begin_clock = orcs_engine.get_global_cycle();
 };
 
@@ -175,82 +228,81 @@ void processor_t::allocate() {
 void processor_t::clock() {
 
 	/// Get the next instruction from the trace
+	int guess = 0;
+	last_sum = 0;
 	opcode_package_t new_instruction;
-	if (!penalty_count) {
-		if (!orcs_engine.trace_reader->trace_fetch(&new_instruction)) {
-			orcs_engine.simulator_alive = false;
-		}
-
-		int btb_idx = get_btb_idx(btb, new_instruction.opcode_address);
-
-		if(new_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH) {
-			total_branches++;
-			if (new_instruction.opcode_address != btb[btb_idx].tag) {
-				/// Branch is not on BTB - Store branch info
-				/// Guess = Always Taken
-				penalty_count++;
-				miss_btb++;
-				btb[btb_idx].tag = new_instruction.opcode_address;
-				btb[btb_idx].addr = 0;
-				btb[btb_idx].clock = orcs_engine.get_global_cycle();
-				btb[btb_idx].valid = 1;
-				btb[btb_idx].branch_type = new_instruction.branch_type;
-				btb[btb_idx].bht = 1;
-				guess = btb[btb_idx].bht;
-			} else {
-				/// Branch is on BTB
-				/// Guess = BHT 1 Bit
-				guess = btb[btb_idx].bht;
-			}
-
-			last_idx = btb_idx;
-			last_instruction = new_instruction;
-		} else {
-			if (last_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH && last_instruction.branch_type == BRANCH_COND) {
-				/// If last instruction was an conditional branch, check if it was taken or not
-				if (last_instruction.opcode_address
-						+ last_instruction.opcode_size
-						== new_instruction.opcode_address) {
-					/// Branch not taken
-					btb[last_idx].bht = 0;
-					if (guess == 1) {
-						/// Wrong guess generates penalty
-						penalty_count++;
-						wrong_guess++;
-					}
-				} else {
-					/// Branch taken
-					btb[last_idx].bht = 1;
-					if (guess == 0) {
-						/// Wrong guess generates penalty
-						penalty_count++;
-						wrong_guess++;
-					}
-				}
-			}
-			last_idx = btb_idx;
-			last_instruction = new_instruction;
-		}
-
-		/// Cache
-		if (new_instruction.is_read) {
-			get_l1(new_instruction.read_address);
-		}
-		if (new_instruction.is_read2) {
-			get_l1(new_instruction.read2_address);
-		}
-		if (new_instruction.is_write) {
-			put_l1(new_instruction.write_address);
-		}
-
-
-
-	} else if (penalty_count == BTB_PENALTY) {
-		/// After 8 cycles the processor is able to get a new instruction
-		penalty_count = 0;
-   	} else {
-		penalty_count++;
+	if (!orcs_engine.trace_reader->trace_fetch(&new_instruction)) {
+		orcs_engine.simulator_alive = false;
 	}
+
+	int btb_idx = get_btb_idx(btb, new_instruction.opcode_address);
+
+	if(new_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH) {
+		total_branches++;
+		enqueue(past_branch, new_instruction.opcode_address);
+		if (new_instruction.opcode_address != btb[btb_idx].tag) {
+			/// Branch is not on BTB - Store branch info
+			orcs_engine.global_cycle += 8;
+			miss_btb++;
+			btb[btb_idx].tag = new_instruction.opcode_address;
+			btb[btb_idx].addr = 0;
+			btb[btb_idx].clock = orcs_engine.get_global_cycle();
+			btb[btb_idx].valid = 1;
+			btb[btb_idx].branch_type = new_instruction.branch_type;
+			//If not on BTB, needs to load pc+opcode_size
+			guess = 0;
+		} else {
+			/// Branch is on BTB
+			/// Guess = BHT 2 Bit
+			guess = prediction(new_instruction.opcode_address);
+		}
+	}
+	if (last_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH && last_instruction.branch_type == BRANCH_COND) {
+		/// If last instruction was an conditional branch, check if it was taken or not
+		if (last_instruction.opcode_address
+				+ last_instruction.opcode_size
+				== new_instruction.opcode_address) {
+			/// Branch not taken
+			update(0);
+			history_segment = (history_segment << 1);
+			if (predicted == 1) {
+				/// Wrong guess generates penalty
+				orcs_engine.global_cycle += 8;
+				wrong_guess++;
+			}
+		} else {
+			/// Branch taken
+			update(1);
+			history_segment = (history_segment << 1) | 1;
+			if (predicted == 0) {
+				/// Wrong guess generates penalty
+				orcs_engine.global_cycle += 8;
+				wrong_guess++;
+			}
+		}
+	}
+	predicted = guess;
+	for (int i = 0; i < PRED_TABLES; i++) {
+		last_ind->gshare[i] = ind->gshare[i];
+		last_ind->path[i] = ind->path[i];
+	}
+	last_sum = sum;
+	last_idx = btb_idx;
+	last_instruction = new_instruction;
+
+
+	/// Cache
+	if (new_instruction.is_read) {
+		get_l1(new_instruction.read_address);
+	}
+	if (new_instruction.is_read2) {
+		get_l1(new_instruction.read2_address);
+	}
+	if (new_instruction.is_write) {
+		put_l1(new_instruction.write_address);
+	}
+
+
 };
 
 // =====================================================================

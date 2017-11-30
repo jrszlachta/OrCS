@@ -19,7 +19,7 @@ SRC_TRACE_READER = 	trace_reader.cpp
 
 SRC_PROCESSOR =	 	processor.cpp 
 
-SRC_CORE =  simulator.cpp orcs_engine.cpp\
+SRC_CORE =  simulator.cpp orcs_engine.cpp queue.cpp\
 			$(SRC_TRACE_READER)	\
 			$(SRC_PACKAGE) \
 			$(SRC_PROCESSOR)
