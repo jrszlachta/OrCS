@@ -139,28 +139,34 @@ void processor_t:: get_l1(uint64_t addr) {
 }
 
 void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
-	orcs_engine.global_cycle += 4;
+	if (ready == 0) orcs_engine.global_cycle += 4;
 	uint64_t tag = addr >> 6;
 	int idx = find_on_cache(l2, addr, 2);
 	if (idx != -1 && tag == l2[idx].tag) {
 		if (l2[idx].valid) {
-			hit_l2++;
-			l2[idx].clock = orcs_engine.get_global_cycle();
 			if (l2[idx].prefetched) {
+				if (l2[idx].ready > orcs_engine.get_global_cycle()) {
+					uint64_t diff = l2[idx].ready - orcs_engine.get_global_cycle();
+					orcs_engine.global_cycle += diff;
+					wait_time += diff;
+				}
 				l2[idx].prefetched = 0;
 				used_prefetches++;
 			}
+			if (ready > 0) {
+				total_prefetches--;
+			} else {
+				hit_l2++;
+				l2[idx].clock = orcs_engine.get_global_cycle();
+			}
 		} else {
 			idx = get_cache_idx(l2, addr, 2);
-			miss_l2++;
 			if (ready != 0) {
 				l2[idx].ready = ready;
 				l2[idx].prefetched = 1;
 			} else {
-				if (l2[idx].ready > orcs_engine.get_global_cycle())
-					orcs_engine.global_cycle += (l2[idx].ready - orcs_engine.get_global_cycle());
-				else
-					orcs_engine.global_cycle += 200;
+				miss_l2++;
+				orcs_engine.global_cycle += 200;
 				prefetch(addr);
 			}
 			l2[idx].tag = tag;
@@ -170,15 +176,12 @@ void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
 		}
 	} else {
 		idx = get_cache_idx(l2, addr, 2);
-		miss_l2++;
 		if (ready != 0) {
 			l2[idx].ready = ready;
 			l2[idx].prefetched = 1;
 		} else {
-			if (l2[idx].ready > orcs_engine.get_global_cycle())
-				orcs_engine.global_cycle += (l2[idx].ready - orcs_engine.get_global_cycle());
-			else
-				orcs_engine.global_cycle += 200;
+			miss_l2++;
+			orcs_engine.global_cycle += 200;
 			prefetch(addr);
 		}
 		if (l2[idx].dirty && l2[idx].valid) {
@@ -402,6 +405,7 @@ void processor_t::statistics() {
 	ORCS_PRINTF("L1: Hits: %lu - Total: %lu - Ratio: %f\n", hit_l1, (hit_l1 + miss_l1), (float) (hit_l1)/(hit_l1 + miss_l1));
 	ORCS_PRINTF("L2: Hits: %lu - Total: %lu - Ratio: %f\n", hit_l2, (hit_l2 + miss_l2), (float) (hit_l2)/(hit_l2 + miss_l2));
 	ORCS_PRINTF("Write Backs: %lu\n", write_backs);
-	ORCS_PRINTF("Prefetches: Used: %lu, Total: %lu, Ratio: %f\n", used_prefetches, total_prefetches, (float) (used_prefetches/(float)total_prefetches));
+	ORCS_PRINTF("Prefetches: Used: %lu, Total: %lu, Ratio: %f, Avg: %f\n", used_prefetches, total_prefetches,
+		   	(float) (used_prefetches/(float)total_prefetches), (float) (wait_time/(float)total_prefetches));
 };
 

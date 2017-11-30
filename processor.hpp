@@ -66,6 +66,7 @@ class processor_t {
 		stride_line *s;
 		uint64_t total_prefetches;
 		uint64_t used_prefetches;
+		uint64_t wait_time;
 
 		uint64_t begin_clock;
 		uint64_t end_clock;
