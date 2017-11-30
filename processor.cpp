@@ -144,18 +144,18 @@ void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
 	int idx = find_on_cache(l2, addr, 2);
 	if (idx != -1 && tag == l2[idx].tag) {
 		if (l2[idx].valid) {
-			if (l2[idx].prefetched) {
-				if (l2[idx].ready > orcs_engine.get_global_cycle()) {
-					uint64_t diff = l2[idx].ready - orcs_engine.get_global_cycle();
-					orcs_engine.global_cycle += diff;
-					wait_time += diff;
-				}
-				l2[idx].prefetched = 0;
-				used_prefetches++;
-			}
 			if (ready > 0) {
 				total_prefetches--;
 			} else {
+				if (l2[idx].prefetched) {
+					if (l2[idx].ready > orcs_engine.get_global_cycle()) {
+						uint64_t diff = l2[idx].ready - orcs_engine.get_global_cycle();
+						orcs_engine.global_cycle += diff;
+						wait_time += diff;
+					}
+					l2[idx].prefetched = 0;
+					used_prefetches++;
+				}
 				hit_l2++;
 				l2[idx].clock = orcs_engine.get_global_cycle();
 			}
@@ -406,6 +406,6 @@ void processor_t::statistics() {
 	ORCS_PRINTF("L2: Hits: %lu - Total: %lu - Ratio: %f\n", hit_l2, (hit_l2 + miss_l2), (float) (hit_l2)/(hit_l2 + miss_l2));
 	ORCS_PRINTF("Write Backs: %lu\n", write_backs);
 	ORCS_PRINTF("Prefetches: Used: %lu, Total: %lu, Ratio: %f, Avg: %f\n", used_prefetches, total_prefetches,
-		   	(float) (used_prefetches/(float)total_prefetches), (float) (wait_time/(float)total_prefetches));
+		   	(float) (used_prefetches/(float)total_prefetches), (float) (wait_time/(float)used_prefetches));
 };
 
