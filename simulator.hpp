@@ -37,7 +37,7 @@ extern orcs_engine_t orcs_engine;
 #define BTB_WAYS	4
 
 // ===========================================================================
-// Yet Another Predictor
+/// Definitions for: GShare/Path Predictor
 // ===========================================================================
 #define PRED_TABLES  16
 #define PRED_WEIGHTS 1024
@@ -54,6 +54,16 @@ extern orcs_engine_t orcs_engine;
 #define L2_WAYS		8
 #define L2_LINES	16384
 #define L2_SET_MASK	(L2_LINES/L2_WAYS - 1)
+
+// ============================================================================
+/// Definitions for: Stride Prefetcher
+// ============================================================================
+#define STRIDE_LINES 	16
+#define STRIDE_DEGREE 	1
+#define STRIDE_DIST 	4
+#define STRIDE_INVALID	0
+#define STRIDE_TRAINING 1
+#define STRIDE_ACTIVE 	2
 
 // ============================================================================
 /// Definitions for Log, Debug, Warning, Error and Statistics

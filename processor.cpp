@@ -2,6 +2,8 @@
 #include "queue.hpp"
 #include <cmath>
 
+#define PREFECTH 1
+
 static unsigned int get_btb_idx(btb_line *btb, uint64_t addr) {
 	/// Set Number taken from bits 2-8 on the address
 	unsigned int set_number = (int) ((addr >> 2) & 0x7F);
@@ -92,6 +94,18 @@ static int find_on_cache(cache_line *L, uint64_t addr, int level) {
 	return -1;
 }
 
+static int prefetcher_idx(stride_line *s, uint64_t pc) {
+	int line = -1;
+	uint64_t min_clock = 0xFFFFFFFFFFFFFFFF;
+	for (int i = 0; i < STRIDE_LINES; i++) {
+		if (s[i].tag == pc) return i;
+	}
+	for (int i = 0; i < STRIDE_LINES; i++) {
+		if (s[i].clock < min_clock) line = i;
+	}
+	return line;
+}
+
 void processor_t:: get_l1(uint64_t addr) {
 	orcs_engine.global_cycle++;
 	uint64_t tag = addr >> 6;
@@ -102,7 +116,7 @@ void processor_t:: get_l1(uint64_t addr) {
 			l1[idx].clock = orcs_engine.get_global_cycle();
 		} else {
 			miss_l1++;
-			get_l2(addr);
+			get_l2(addr, 0);
 			idx = get_cache_idx(l1, addr, 1);
 			l1[idx].tag = tag;
 			l1[idx].clock = orcs_engine.get_global_cycle();
@@ -116,7 +130,7 @@ void processor_t:: get_l1(uint64_t addr) {
 			write_backs++;
 			orcs_engine.global_cycle += 200;
 		}
-		get_l2(addr);
+		get_l2(addr, 0);
 		l1[idx].tag = tag;
 		l1[idx].clock = orcs_engine.get_global_cycle();
 		l1[idx].valid = 1;
@@ -124,7 +138,7 @@ void processor_t:: get_l1(uint64_t addr) {
 	}
 }
 
-void processor_t:: get_l2(uint64_t addr) {
+void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
 	orcs_engine.global_cycle += 4;
 	uint64_t tag = addr >> 6;
 	int idx = find_on_cache(l2, addr, 2);
@@ -132,10 +146,23 @@ void processor_t:: get_l2(uint64_t addr) {
 		if (l2[idx].valid) {
 			hit_l2++;
 			l2[idx].clock = orcs_engine.get_global_cycle();
+			if (l2[idx].prefetched) {
+				l2[idx].prefetched = 0;
+				used_prefetches++;
+			}
 		} else {
 			idx = get_cache_idx(l2, addr, 2);
 			miss_l2++;
-			orcs_engine.global_cycle += 200;
+			if (ready != 0) {
+				l2[idx].ready = ready;
+				l2[idx].prefetched = 1;
+			} else {
+				if (l2[idx].ready > orcs_engine.get_global_cycle())
+					orcs_engine.global_cycle += (l2[idx].ready - orcs_engine.get_global_cycle());
+				else
+					orcs_engine.global_cycle += 200;
+				prefetch(addr);
+			}
 			l2[idx].tag = tag;
 			l2[idx].clock = orcs_engine.get_global_cycle();
 			l2[idx].valid = 1;
@@ -144,7 +171,16 @@ void processor_t:: get_l2(uint64_t addr) {
 	} else {
 		idx = get_cache_idx(l2, addr, 2);
 		miss_l2++;
-		orcs_engine.global_cycle += 200;
+		if (ready != 0) {
+			l2[idx].ready = ready;
+			l2[idx].prefetched = 1;
+		} else {
+			if (l2[idx].ready > orcs_engine.get_global_cycle())
+				orcs_engine.global_cycle += (l2[idx].ready - orcs_engine.get_global_cycle());
+			else
+				orcs_engine.global_cycle += 200;
+			prefetch(addr);
+		}
 		if (l2[idx].dirty && l2[idx].valid) {
 			write_backs++;
 			orcs_engine.global_cycle += 200;
@@ -165,6 +201,45 @@ void processor_t::put_l1(uint64_t addr) {
 	if (l2_idx != -1) l2[l2_idx].valid = 0;
 }
 
+void processor_t::prefetch(uint64_t addr) {
+	uint64_t pc = new_instruction.opcode_address;
+	int idx = prefetcher_idx(s, pc);
+	if (s[idx].tag == pc) {
+		if (s[idx].status == STRIDE_INVALID) {
+			s[idx].tag = pc;
+			s[idx].clock = orcs_engine.get_global_cycle();
+			s[idx].last_addr = addr;
+			s[idx].stride = 0;
+			s[idx].status = STRIDE_TRAINING;
+		} else if (s[idx].status == STRIDE_TRAINING) {
+			if (addr - s[idx].last_addr == s[idx].stride) {
+				s[idx].status = STRIDE_ACTIVE;
+				s[idx].clock = orcs_engine.get_global_cycle();
+				s[idx].last_addr = addr;
+			} else {
+				s[idx].stride = addr - s[idx].last_addr;
+				s[idx].clock = orcs_engine.get_global_cycle();
+				s[idx].last_addr = addr;
+			}
+		} else {
+			if (addr - s[idx].last_addr == s[idx].stride) {
+				total_prefetches++;
+				uint64_t to_get = addr + STRIDE_DIST * s[idx].stride;
+				get_l2(to_get, orcs_engine.get_global_cycle()+200);
+				s[idx].clock = orcs_engine.get_global_cycle();
+			} else {
+				s[idx].status = STRIDE_INVALID;
+			}
+		}
+	} else {
+		s[idx].tag = pc;
+		s[idx].clock = orcs_engine.get_global_cycle();
+		s[idx].last_addr = addr;
+		s[idx].stride = 0;
+		s[idx].status = STRIDE_INVALID;
+	}
+}
+
 // =====================================================================
 processor_t::processor_t() {
 
@@ -175,6 +250,7 @@ void processor_t::allocate() {
 	btb = (btb_line *) malloc(sizeof(btb_line)*BTB_LINES);
 	l1 = (cache_line *) malloc(sizeof(cache_line)*L1_LINES);
 	l2 = (cache_line *) malloc(sizeof(cache_line)*L2_LINES);
+	s = (stride_line *) malloc(sizeof(stride_line)*STRIDE_LINES);
 	for (int i = 0; i < BTB_LINES; i++) {
 		btb[i].tag = 0;
 		btb[i].addr = 0;
@@ -185,14 +261,25 @@ void processor_t::allocate() {
 	for (int i = 0; i < L1_LINES; i++) {
 		l1[i].tag = 0;
 		l1[i].clock = 0;
+		l1[i].ready = 0;
 		l1[i].valid = 0;
 		l1[i].dirty = 0;
+		l1[i].prefetched = 0;
 	}
 	for(int i = 0; i < L2_LINES; i++) {
 		l2[i].tag = 0;
 		l2[i].clock = 0;
+		l2[i].ready = 0;
 		l2[i].valid = 0;
 		l2[i].dirty = 0;
+		l2[i].prefetched = 0;
+	}
+	for(int i = 0; i < STRIDE_LINES; i++) {
+		s[i].tag = 0;
+		s[i].clock = 0;
+		s[i].last_addr = 0;
+		s[i].stride = 0;
+		s[i].status = STRIDE_INVALID;
 	}
 	miss_btb = 0;
 	miss_l1 = 0;
@@ -203,6 +290,8 @@ void processor_t::allocate() {
 	total_branches = 0;
 	penalty_count = 0;
 	last_idx = 0;
+	total_prefetches = 0;
+	used_prefetches = 0;
 
 	threshold = (uint8_t) floor(1.93*PRED_TABLES + PRED_TABLES/2);
 	history_segment = 0;
@@ -230,7 +319,6 @@ void processor_t::clock() {
 	/// Get the next instruction from the trace
 	int guess = 0;
 	last_sum = 0;
-	opcode_package_t new_instruction;
 	if (!orcs_engine.trace_reader->trace_fetch(&new_instruction)) {
 		orcs_engine.simulator_alive = false;
 	}
@@ -314,5 +402,6 @@ void processor_t::statistics() {
 	ORCS_PRINTF("L1: Hits: %lu - Total: %lu - Ratio: %f\n", hit_l1, (hit_l1 + miss_l1), (float) (hit_l1)/(hit_l1 + miss_l1));
 	ORCS_PRINTF("L2: Hits: %lu - Total: %lu - Ratio: %f\n", hit_l2, (hit_l2 + miss_l2), (float) (hit_l2)/(hit_l2 + miss_l2));
 	ORCS_PRINTF("Write Backs: %lu\n", write_backs);
+	ORCS_PRINTF("Prefetches: Used: %lu, Total: %lu, Ratio: %f\n", used_prefetches, total_prefetches, (float) (used_prefetches/(float)total_prefetches));
 };
 
