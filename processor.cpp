@@ -2,7 +2,8 @@
 #include "queue.hpp"
 #include <cmath>
 
-#define PREFECTH 1
+#define PREFECTH	1
+#define LOOKAHEAD	1
 
 static unsigned int get_btb_idx(btb_line *btb, uint64_t addr) {
 	/// Set Number taken from bits 2-8 on the address
@@ -180,8 +181,10 @@ void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
 		l2[idx].valid = 1;
 		l2[idx].dirty = 0;
 	}
+#if PREFECTH
 	if (ready == 0)
 		try_prefetch(addr);
+#endif
 }
 
 void processor_t::put_l1(uint64_t addr) {
@@ -349,12 +352,14 @@ void processor_t::try_prefetch(uint64_t addr) {
 	if (pf_idx >= 0) { // > 50%
 		int pf_stride = pt[pf_idx].stride;
 		prefetch(addr, pf_stride);
+#if LOOKAHEAD
 		uint32_t la_signature = ((signature << SIG_SHIFT) ^ (pf_stride & SIG_SHIFT)) & ((1 << SIG_LENGTH) - 1);
 		int la_idx = pt_find_max(pt, la_signature, confidence, 1);
 		if (la_idx >= 0) { // > 75%
 			int la_stride = pt[la_idx].stride;
 			look_ahead(addr, la_stride);
 		}
+#endif
 	}
 	free(confidence);
 }
@@ -446,10 +451,10 @@ void processor_t::allocate() {
 
 // =====================================================================
 void processor_t::clock() {
-
 	/// Get the next instruction from the trace
 	int guess = 0;
 	last_sum = 0;
+	opcode_package_t new_instruction;
 	if (!orcs_engine.trace_reader->trace_fetch(&new_instruction)) {
 		orcs_engine.simulator_alive = false;
 	}
@@ -486,7 +491,7 @@ void processor_t::clock() {
 			history_segment = (history_segment << 1);
 			if (predicted == 1) {
 				/// Wrong guess generates penalty
-				orcs_engine.global_cycle += 8;
+				//orcs_engine.global_cycle += 8;
 				wrong_guess++;
 			}
 		} else {
@@ -495,7 +500,7 @@ void processor_t::clock() {
 			history_segment = (history_segment << 1) | 1;
 			if (predicted == 0) {
 				/// Wrong guess generates penalty
-				orcs_engine.global_cycle += 8;
+				//orcs_engine.global_cycle += 8;
 				wrong_guess++;
 			}
 		}

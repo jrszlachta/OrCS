@@ -50,7 +50,6 @@ class processor_t {
 		btb_line *btb;
 		int penalty_count;
 		unsigned int last_idx;
-		opcode_package_t new_instruction;
 		opcode_package_t last_instruction;
 		uint64_t miss_btb;
 		uint64_t total_branches;
