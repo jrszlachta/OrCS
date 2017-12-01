@@ -167,7 +167,9 @@ void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
 			} else {
 				miss_l2++;
 				orcs_engine.global_cycle += 200;
+#if PREFETCH
 				prefetch(addr);
+#endif
 			}
 			l2[idx].tag = tag;
 			l2[idx].clock = orcs_engine.get_global_cycle();
@@ -182,7 +184,9 @@ void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
 		} else {
 			miss_l2++;
 			orcs_engine.global_cycle += 200;
+#if PREFETCH
 			prefetch(addr);
+#endif
 		}
 		if (l2[idx].dirty && l2[idx].valid) {
 			write_backs++;
@@ -345,7 +349,7 @@ void processor_t::clock() {
 		} else {
 			/// Branch is on BTB
 			/// Guess = BHT 2 Bit
-			guess = prediction(new_instruction.opcode_address);
+			//guess = prediction(new_instruction.opcode_address);
 		}
 	}
 	if (last_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH && last_instruction.branch_type == BRANCH_COND) {
@@ -354,20 +358,20 @@ void processor_t::clock() {
 				+ last_instruction.opcode_size
 				== new_instruction.opcode_address) {
 			/// Branch not taken
-			update(0);
+			//update(0);
 			history_segment = (history_segment << 1);
 			if (predicted == 1) {
 				/// Wrong guess generates penalty
-				orcs_engine.global_cycle += 8;
+				//orcs_engine.global_cycle += 8;
 				wrong_guess++;
 			}
 		} else {
 			/// Branch taken
-			update(1);
+			//update(1);
 			history_segment = (history_segment << 1) | 1;
 			if (predicted == 0) {
 				/// Wrong guess generates penalty
-				orcs_engine.global_cycle += 8;
+				//orcs_engine.global_cycle += 8;
 				wrong_guess++;
 			}
 		}
