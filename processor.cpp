@@ -357,7 +357,7 @@ void processor_t::try_prefetch(uint64_t addr) {
 		int la_idx = pt_find_max(pt, la_signature, confidence, 1);
 		if (la_idx >= 0) { // > 75%
 			int la_stride = pt[la_idx].stride;
-			look_ahead(addr, la_stride);
+			look_ahead(addr, la_stride+pf_stride);
 		}
 #endif
 	}
