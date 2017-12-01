@@ -22,12 +22,24 @@ struct cache_line {
 	int prefetched;
 };
 
-struct stride_line {
-	uint64_t tag;
+struct st_line {
 	uint64_t clock;
-	uint64_t last_addr;
-	uint64_t stride;
-	int status;
+	uint32_t tag;
+	uint32_t last_block;
+	uint32_t signature;
+	int valid;
+};
+
+struct pt_line {
+	int valid;
+	int stride;
+	int counter;
+};
+
+struct pe_line {
+	uint64_t clock;
+	uint32_t tag;
+	int valid;
 };
 
 class processor_t {
@@ -63,7 +75,9 @@ class processor_t {
 		uint64_t write_backs;
 
 		// PREFETCHER
-		stride_line *s;
+		st_line *st;
+		pt_line *pt;
+		pe_line *pe;
 		uint64_t total_prefetches;
 		uint64_t used_prefetches;
 		uint64_t wait_time;
@@ -81,6 +95,10 @@ class processor_t {
 		void get_l1(uint64_t addr);
 		void get_l2(uint64_t addr, uint64_t ready);
 		void put_l1(uint64_t addr);
-		void prefetch(uint64_t addr);
+		uint32_t train_st(uint64_t addr);
+		void update_pt(uint32_t signature, int stride);
+		void prefetch(uint64_t addr, int stride);
+		void look_ahead(uint64_t addr, int stride);
+		void try_prefetch(uint64_t addr);
 	    void statistics();
 };

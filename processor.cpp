@@ -94,18 +94,6 @@ static int find_on_cache(cache_line *L, uint64_t addr, int level) {
 	return -1;
 }
 
-static int prefetcher_idx(stride_line *s, uint64_t pc) {
-	int line = -1;
-	uint64_t min_clock = 0xFFFFFFFFFFFFFFFF;
-	for (int i = 0; i < STRIDE_LINES; i++) {
-		if (s[i].tag == pc) return i;
-	}
-	for (int i = 0; i < STRIDE_LINES; i++) {
-		if (s[i].clock < min_clock) line = i;
-	}
-	return line;
-}
-
 void processor_t:: get_l1(uint64_t addr) {
 	orcs_engine.global_cycle++;
 	uint64_t tag = addr >> 6;
@@ -158,6 +146,7 @@ void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
 				}
 				hit_l2++;
 				l2[idx].clock = orcs_engine.get_global_cycle();
+				l2[idx].ready = 0;
 			}
 		} else {
 			idx = get_cache_idx(l2, addr, 2);
@@ -167,7 +156,6 @@ void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
 			} else {
 				miss_l2++;
 				orcs_engine.global_cycle += 200;
-				prefetch(addr);
 			}
 			l2[idx].tag = tag;
 			l2[idx].clock = orcs_engine.get_global_cycle();
@@ -182,7 +170,6 @@ void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
 		} else {
 			miss_l2++;
 			orcs_engine.global_cycle += 200;
-			prefetch(addr);
 		}
 		if (l2[idx].dirty && l2[idx].valid) {
 			write_backs++;
@@ -193,7 +180,8 @@ void processor_t:: get_l2(uint64_t addr, uint64_t ready) {
 		l2[idx].valid = 1;
 		l2[idx].dirty = 0;
 	}
-
+	if (ready == 0)
+		try_prefetch(addr);
 }
 
 void processor_t::put_l1(uint64_t addr) {
@@ -204,43 +192,171 @@ void processor_t::put_l1(uint64_t addr) {
 	if (l2_idx != -1) l2[l2_idx].valid = 0;
 }
 
-void processor_t::prefetch(uint64_t addr) {
-	uint64_t pc = new_instruction.opcode_address;
-	int idx = prefetcher_idx(s, pc);
-	if (s[idx].tag == pc) {
-		if (s[idx].status == STRIDE_INVALID) {
-			s[idx].tag = pc;
-			s[idx].clock = orcs_engine.get_global_cycle();
-			s[idx].last_addr = addr;
-			s[idx].stride = 0;
-			s[idx].status = STRIDE_TRAINING;
-		} else if (s[idx].status == STRIDE_TRAINING) {
-			if (addr - s[idx].last_addr == s[idx].stride) {
-				s[idx].status = STRIDE_ACTIVE;
-				s[idx].clock = orcs_engine.get_global_cycle();
-				s[idx].last_addr = addr;
-			} else {
-				s[idx].stride = addr - s[idx].last_addr;
-				s[idx].clock = orcs_engine.get_global_cycle();
-				s[idx].last_addr = addr;
-			}
-		} else {
-			if (addr - s[idx].last_addr == s[idx].stride) {
-				total_prefetches++;
-				uint64_t to_get = addr + STRIDE_DIST * s[idx].stride;
-				get_l2(to_get, orcs_engine.get_global_cycle()+200);
-				s[idx].clock = orcs_engine.get_global_cycle();
-			} else {
-				s[idx].status = STRIDE_INVALID;
-			}
-		}
-	} else {
-		s[idx].tag = pc;
-		s[idx].clock = orcs_engine.get_global_cycle();
-		s[idx].last_addr = addr;
-		s[idx].stride = 0;
-		s[idx].status = STRIDE_INVALID;
+static int st_idx(st_line *st, uint64_t addr) {
+	uint64_t page = addr >> 12;
+	int set = page % PRIME1;
+	uint64_t tag = page && ((1 << ST_TAG_BIT) - 1);
+	uint64_t min_clock = 0xFFFFFFFFFFFFFFFF;
+	int begin = set * ST_WAYS;
+	int end = begin + ST_WAYS;
+	int idx = 0;
+	for (int i = begin; i < end; i++) {
+		if (st[i].valid && st[i].tag == tag) return i;
 	}
+	for (int i = begin; i < end; i++) {
+		if (!st[i].valid) return i;
+		if (st[i].clock < min_clock) {
+			idx = i;
+			min_clock = st[i].clock;
+		}
+	}
+	return idx;
+}
+
+static int pt_find_max(pt_line *pt, uint32_t signature, float *confidence, int mode) {
+	// mode: 0 -> Prefetch, 1 -> Look Ahead
+	int begin = signature * PT_WAYS;
+	int end = begin + PT_WAYS;
+	float max = 0, prob = 0;
+	int idx = -1;
+	for (int i = begin; i < end; i++) {
+		if (pt[i].valid) prob = *confidence * pt[i].counter/((float)(1 << COUNTER_BIT));
+		if (prob > max) {
+			max = prob;
+			idx = i;
+		}
+	}
+	if (max*100 > (mode == 0 ? PF_THRESH : LA_THRESH)) {
+		*confidence = max;
+		return idx;
+	}
+	return -1;
+}
+
+static int pe_idx(pe_line *pe, uint64_t addr) {
+	uint64_t page = addr >> 12;
+	int set = page % PRIME2;
+	if (set > 255) set = page % PRIME3;
+	uint64_t tag = page && ((1 << ST_TAG_BIT) - 1);
+	uint64_t min_clock = 0xFFFFFFFFFFFFFFFF;
+	int begin = set * PT_WAYS;
+	int end = begin + PT_WAYS;
+	int idx = 0;
+	for (int i = begin; i < end; i++) {
+		if (pe[i].valid && pe[i].tag == tag) return i;
+	}
+	for (int i = begin; i < end; i++) {
+		if (!pe[i].valid) return i;
+		if (pe[i].clock < min_clock) {
+			idx = i;
+			min_clock = pe[i].clock;
+		}
+	}
+	return idx;
+}
+
+uint32_t processor_t::train_st(uint64_t addr) {
+	int idx = st_idx(st, addr);
+	uint32_t tag = ((addr >> 12) & ((1 << ST_TAG_BIT) - 1));
+	uint32_t block = ((addr >> 6) & 0x3F);
+	uint32_t sig;
+	if (st[idx].valid && st[idx].tag == tag) { // HIT
+		int stride = block - st[idx].last_block;
+		sig = 0;
+		if (stride != 0) {
+			update_pt(st[idx].signature, stride);
+			sig = (((st[idx].signature << SIG_SHIFT) ^ (stride & SIG_SHIFT)) & ((1 << SIG_LENGTH) - 1));
+			st[idx].signature = sig;
+		}
+		st[idx].clock = orcs_engine.get_global_cycle();
+		st[idx].last_block = block;
+		return sig;
+	} else { // MISS or INVALID
+		sig = block;
+		st[idx].clock = orcs_engine.get_global_cycle();
+		st[idx].tag = tag;
+		st[idx].last_block = block;
+		st[idx].signature = sig;
+		st[idx].valid = 1;
+		return 0;
+	}
+}
+
+void processor_t::update_pt(uint32_t signature, int stride) {
+	int set = signature;
+	int begin = set * PT_WAYS;
+	int end = begin + PT_WAYS;
+	int idx = 0;
+	int min_counter = (1 << COUNTER_BIT) - 1;
+	for (int i = begin; i < end; i++) {
+		if (pt[i].valid && pt[i].stride == stride) { // HIT
+			if (pt[i].counter < (1 << COUNTER_BIT))
+				pt[i].counter++;
+			return;
+		} else if (!pt[i].valid) { // INVALID
+			pt[i].stride = stride;
+			pt[i].valid = 1;
+			pt[i].counter = 0;
+			return;
+		}
+		if (pt[i].counter < min_counter) {
+			idx = i;
+			min_counter = pt[i].counter;
+		}
+	}
+	// MISS
+	pt[idx].stride = stride;
+	pt[idx].valid = 1;
+	for (int i = begin; i < end; i++) {
+		if (pt[i].counter > 0)
+			pt[i].counter--;
+	}
+	pt[idx].counter = 0;
+}
+
+void processor_t::prefetch(uint64_t addr, int stride) {
+	int idx = pe_idx(pe, addr);
+	uint32_t tag = ((addr >> 12) & ((1 << ST_TAG_BIT) - 1));
+	uint64_t block = (addr >> 6);
+	if (pe[idx].valid && pe[idx].tag == tag) {
+		pe[idx].clock = orcs_engine.get_global_cycle();
+		uint64_t prefetch_addr = (block + stride) << 6;
+		total_prefetches++;
+		get_l2(prefetch_addr, orcs_engine.get_global_cycle()+200);
+	} else {
+		pe[idx].tag = tag;
+		pe[idx].valid = 1;
+		pe[idx].clock = orcs_engine.get_global_cycle();
+	}
+}
+
+void processor_t::look_ahead(uint64_t addr, int stride) {
+	int idx = pe_idx(pe, addr);
+	uint32_t tag = ((addr >> 12) & ((1 << ST_TAG_BIT) - 1));
+	uint64_t block = (addr >> 6);
+	if (pe[idx].valid && pe[idx].tag == tag) {
+		uint64_t look_ahead_addr = (block + stride) << 6;
+		total_prefetches++;
+		get_l2(look_ahead_addr, orcs_engine.get_global_cycle()+400);
+	}
+}
+
+void processor_t::try_prefetch(uint64_t addr) {
+	float *confidence = (float *) malloc(sizeof(float));
+	*confidence = 1.0f;
+	uint32_t signature = train_st(addr);
+	int pf_idx = pt_find_max(pt, signature, confidence, 0); // Mode Prefetch
+	if (pf_idx >= 0) { // > 50%
+		int pf_stride = pt[pf_idx].stride;
+		prefetch(addr, pf_stride);
+		uint32_t la_signature = ((signature << SIG_SHIFT) ^ (pf_stride & SIG_SHIFT)) & ((1 << SIG_LENGTH) - 1);
+		int la_idx = pt_find_max(pt, la_signature, confidence, 1);
+		if (la_idx >= 0) { // > 75%
+			int la_stride = pt[la_idx].stride;
+			look_ahead(addr, la_stride);
+		}
+	}
+	free(confidence);
 }
 
 // =====================================================================
@@ -253,7 +369,9 @@ void processor_t::allocate() {
 	btb = (btb_line *) malloc(sizeof(btb_line)*BTB_LINES);
 	l1 = (cache_line *) malloc(sizeof(cache_line)*L1_LINES);
 	l2 = (cache_line *) malloc(sizeof(cache_line)*L2_LINES);
-	s = (stride_line *) malloc(sizeof(stride_line)*STRIDE_LINES);
+	st = (st_line *) malloc(sizeof(st_line)*ST_LINES);
+	pt = (pt_line *) malloc(sizeof(pt_line)*PT_LINES);
+	pe = (pe_line *) malloc(sizeof(pe_line)*PE_LINES);
 	for (int i = 0; i < BTB_LINES; i++) {
 		btb[i].tag = 0;
 		btb[i].addr = 0;
@@ -277,12 +395,22 @@ void processor_t::allocate() {
 		l2[i].dirty = 0;
 		l2[i].prefetched = 0;
 	}
-	for(int i = 0; i < STRIDE_LINES; i++) {
-		s[i].tag = 0;
-		s[i].clock = 0;
-		s[i].last_addr = 0;
-		s[i].stride = 0;
-		s[i].status = STRIDE_INVALID;
+	for(int i = 0; i < ST_LINES; i++) {
+		st[i].clock = 0;
+		st[i].tag = 0;
+		st[i].last_block = 0;
+		st[i].signature = 0;
+		st[i].valid = 0;
+	}
+	for(int i = 0; i < PT_LINES; i++) {
+		pt[i].valid = 0;
+		pt[i].stride = 0;
+		pt[i].counter = 0;
+	}
+	for (int i = 0; i < PE_LINES; i++) {
+		pe[i].clock = 0;
+		pe[i].tag = 0;
+		pe[i].valid = 0;
 	}
 	miss_btb = 0;
 	miss_l1 = 0;
@@ -345,7 +473,7 @@ void processor_t::clock() {
 		} else {
 			/// Branch is on BTB
 			/// Guess = BHT 2 Bit
-			guess = prediction(new_instruction.opcode_address);
+			//guess = prediction(new_instruction.opcode_address);
 		}
 	}
 	if (last_instruction.opcode_operation == INSTRUCTION_OPERATION_BRANCH && last_instruction.branch_type == BRANCH_COND) {
@@ -354,7 +482,7 @@ void processor_t::clock() {
 				+ last_instruction.opcode_size
 				== new_instruction.opcode_address) {
 			/// Branch not taken
-			update(0);
+			//update(0);
 			history_segment = (history_segment << 1);
 			if (predicted == 1) {
 				/// Wrong guess generates penalty
@@ -363,7 +491,7 @@ void processor_t::clock() {
 			}
 		} else {
 			/// Branch taken
-			update(1);
+			//update(1);
 			history_segment = (history_segment << 1) | 1;
 			if (predicted == 0) {
 				/// Wrong guess generates penalty

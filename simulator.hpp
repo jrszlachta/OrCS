@@ -56,14 +56,26 @@ extern orcs_engine_t orcs_engine;
 #define L2_SET_MASK	(L2_LINES/L2_WAYS - 1)
 
 // ============================================================================
-/// Definitions for: Stride Prefetcher
+/// Definitions for: Look Ahead Path Prefetcher
 // ============================================================================
-#define STRIDE_LINES 	16
-#define STRIDE_DEGREE 	1
-#define STRIDE_DIST 	4
-#define STRIDE_INVALID	0
-#define STRIDE_TRAINING 1
-#define STRIDE_ACTIVE 	2
+#define ST_LINES	1024
+#define ST_WAYS		2
+#define ST_SET_MASK (ST_LINES/ST_WAYS - 1)
+#define ST_TAG_BIT	8
+#define SIG_LENGTH	12
+#define SIG_SHIFT	3
+#define PT_LINES	16384
+#define PT_WAYS		4
+#define PT_SET_MASK (PT_LINES/PT_WAYS - 1)
+#define PT_TAG_BIT	7
+#define COUNTER_BIT	3
+#define PE_LINES	512
+#define PE_WAYS		2
+#define PRIME1		509
+#define PRIME2		257
+#define PRIME3		251
+#define PF_THRESH	50
+#define LA_THRESH	75
 
 // ============================================================================
 /// Definitions for Log, Debug, Warning, Error and Statistics
